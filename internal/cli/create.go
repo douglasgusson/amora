@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/douglasgusson/amora/internal/deploy"
 	"github.com/douglasgusson/amora/internal/env"
@@ -76,11 +75,9 @@ func NewCreateCmd() *cobra.Command {
 			LogSuccess("App directory created at %s", appDir)
 
 			// 4. Assign a unique port.
-			port := assignNextPort()
-			vars, _ := env.Load(appName)
-			vars["PORT"] = strconv.Itoa(port)
-			if err := env.Save(appName, vars); err != nil {
-				return fmt.Errorf("saving env file: %w", err)
+			port, err := env.GetOrAssignPort(appName)
+			if err != nil {
+				return fmt.Errorf("assigning port: %w", err)
 			}
 			LogSuccess("Assigned PORT=%d", port)
 
@@ -104,41 +101,3 @@ func NewCreateCmd() *cobra.Command {
 	return cmd
 }
 
-// assignNextPort scans existing .env files to find the highest assigned PORT
-// and returns the next available one. Ports start at 5000.
-func assignNextPort() int {
-	const basePort = 5000
-
-	entries, err := os.ReadDir(env.DefaultDir())
-	if err != nil {
-		return basePort
-	}
-
-	maxPort := basePort - 1
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if len(name) <= 4 {
-			continue
-		}
-
-		// Strip the .env extension to get the app name.
-		app := name[:len(name)-4]
-
-		vars, err := env.Load(app)
-		if err != nil {
-			continue
-		}
-
-		if portStr, ok := vars["PORT"]; ok {
-			if port, err := strconv.Atoi(portStr); err == nil && port > maxPort {
-				maxPort = port
-			}
-		}
-	}
-
-	return maxPort + 1
-}

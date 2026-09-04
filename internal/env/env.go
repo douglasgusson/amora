@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -118,6 +119,64 @@ func (m *Manager) Remove(app, key string) error {
 	return nil
 }
 
+// BasePort is the starting port for dynamic allocation.
+const BasePort = 5000
+
+// GetOrAssignPort returns the PORT for the given app.
+// If PORT is already set in the app's .env, it is returned as-is (idempotent).
+// Otherwise, the allocator scans all .env files in BaseDir to find the highest
+// PORT in use, increments by 1, saves it to the app's .env, and returns it.
+// This is the "zero-database" port allocator — state lives in the filesystem.
+func (m *Manager) GetOrAssignPort(app string) (int, error) {
+	vars, err := m.Load(app)
+	if err != nil {
+		return 0, err
+	}
+
+	// Fast path: PORT already assigned → return it.
+	if portStr, exists := vars["PORT"]; exists {
+		port, err := strconv.Atoi(portStr)
+		if err == nil && port > 0 {
+			return port, nil
+		}
+	}
+
+	// Slow path: scan all .env files to find the highest PORT in use.
+	highestPort := BasePort - 1
+
+	entries, err := os.ReadDir(m.BaseDir)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, fmt.Errorf("reading env directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".env") {
+			continue
+		}
+
+		otherApp := strings.TrimSuffix(entry.Name(), ".env")
+		otherVars, err := m.Load(otherApp)
+		if err != nil {
+			continue
+		}
+
+		if pStr, ok := otherVars["PORT"]; ok {
+			if p, err := strconv.Atoi(pStr); err == nil && p > highestPort {
+				highestPort = p
+			}
+		}
+	}
+
+	newPort := highestPort + 1
+	vars["PORT"] = strconv.Itoa(newPort)
+
+	if err := m.Save(app, vars); err != nil {
+		return 0, fmt.Errorf("saving allocated port: %w", err)
+	}
+
+	return newPort, nil
+}
+
 // --- Package-level convenience functions using DefaultManager ---
 
 var defaultManager = NewManager(DefaultDir())
@@ -136,3 +195,7 @@ func Set(app, key, value string) error { return defaultManager.Set(app, key, val
 
 // Remove loads, deletes one key if it exists, and saves.
 func Remove(app, key string) error { return defaultManager.Remove(app, key) }
+
+// GetOrAssignPort returns the PORT for the given app, allocating one if needed.
+func GetOrAssignPort(app string) (int, error) { return defaultManager.GetOrAssignPort(app) }
+

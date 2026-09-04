@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/douglasgusson/amora/internal/deploy"
@@ -156,14 +155,15 @@ func (p *DeployPipeline) Run(app string) error {
 		LogSuccess("Process: %s → %s", e.Name, e.Command)
 	}
 
-	// ── Step 4: Load environment (for PORT) ────────────────────────────
+	// ── Step 4: Allocate port (dynamic) ───────────────────────────────
 
-	vars, _ := p.EnvMgr.Load(app)
-	portStr := vars["PORT"]
-	port := 0
-	if portStr != "" {
-		port, _ = strconv.Atoi(portStr)
+	LogInfo("Resolving port allocation...")
+	port, err := p.EnvMgr.GetOrAssignPort(app)
+	if err != nil {
+		LogError("Failed to allocate port: %v", err)
+		return fmt.Errorf("port allocation: %w", err)
 	}
+	LogSuccess("PORT=%d", port)
 
 	// ── Step 5: Generate systemd services ──────────────────────────────
 
