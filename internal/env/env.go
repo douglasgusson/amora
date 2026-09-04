@@ -119,6 +119,15 @@ func (m *Manager) Remove(app, key string) error {
 	return nil
 }
 
+// Delete completely removes an app's .env file from disk.
+func (m *Manager) Delete(app string) error {
+	path := m.FilePath(app)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("deleting env file: %w", err)
+	}
+	return nil
+}
+
 // BasePort is the starting port for dynamic allocation.
 const BasePort = 5000
 
@@ -196,6 +205,8 @@ func Set(app, key, value string) error { return defaultManager.Set(app, key, val
 // Remove loads, deletes one key if it exists, and saves.
 func Remove(app, key string) error { return defaultManager.Remove(app, key) }
 
+// Delete completely removes an app's .env file from disk.
+func Delete(app string) error { return defaultManager.Delete(app) }
+
 // GetOrAssignPort returns the PORT for the given app, allocating one if needed.
 func GetOrAssignPort(app string) (int, error) { return defaultManager.GetOrAssignPort(app) }
-

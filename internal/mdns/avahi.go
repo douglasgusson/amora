@@ -81,3 +81,45 @@ func GenerateService(app string) error {
 
 	return nil
 }
+
+// RemoveService deleta o domínio do app do arquivo do Avahi.
+func RemoveService(app string) error {
+	hostsPath := "/etc/avahi/hosts"
+	domain := fmt.Sprintf("%s.local", app)
+
+	content, err := os.ReadFile(hostsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // Se o arquivo não existe, não há nada para remover
+		}
+		return fmt.Errorf("reading avahi hosts: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var newLines []string
+	changed := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && strings.HasSuffix(trimmed, " "+domain) {
+			changed = true
+			continue // Pula essa linha para removê-la
+		}
+		newLines = append(newLines, line)
+	}
+
+	if !changed {
+		return nil
+	}
+
+	result := strings.Join(newLines, "\n")
+	if !strings.HasSuffix(result, "\n") && len(newLines) > 0 {
+		result += "\n"
+	}
+
+	if err := os.WriteFile(hostsPath, []byte(result), 0664); err != nil {
+		return fmt.Errorf("writing avahi hosts: %w", err)
+	}
+
+	return nil
+}

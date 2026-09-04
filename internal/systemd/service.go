@@ -105,6 +105,37 @@ func (g *Generator) StopService(name string) error {
 	return g.RunCmd("systemctl", "--user", "stop", name)
 }
 
+// DisableService disables a service.
+func (g *Generator) DisableService(name string) error {
+	return g.RunCmd("systemctl", "--user", "disable", name)
+}
+
+// DestroyAppServices finds, stops, disables and removes all services for an app.
+func (g *Generator) DestroyAppServices(app string) error {
+	prefix := fmt.Sprintf("amora-%s-", app)
+
+	entries, err := os.ReadDir(g.BaseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading systemd dir: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".service") {
+			// Stop and disable via systemctl
+			g.StopService(name)
+			g.DisableService(name)
+			// Remove the unit file
+			os.Remove(filepath.Join(g.BaseDir, name))
+		}
+	}
+
+	return g.DaemonReload()
+}
+
 // RestartAppServices finds and restarts all services for an app.
 func (g *Generator) RestartAppServices(app string) error {
 	prefix := fmt.Sprintf("amora-%s-", app)
@@ -150,4 +181,6 @@ func DaemonReload() error                     { return defaultGenerator.DaemonRe
 func EnableService(name string) error         { return defaultGenerator.EnableService(name) }
 func RestartService(name string) error        { return defaultGenerator.RestartService(name) }
 func StopService(name string) error           { return defaultGenerator.StopService(name) }
+func DisableService(name string) error        { return defaultGenerator.DisableService(name) }
 func RestartAppServices(app string) error     { return defaultGenerator.RestartAppServices(app) }
+func DestroyAppServices(app string) error     { return defaultGenerator.DestroyAppServices(app) }

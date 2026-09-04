@@ -17,6 +17,7 @@ get automatic mDNS discovery, and zero-config reverse proxy.`,
 	cmd.AddCommand(
 		NewSetupCmd(),
 		NewCreateCmd(),
+		NewDestroyCmd(),
 		NewHookCmd(),
 		NewEnvCmd(),
 		NewLogsCmd(),
