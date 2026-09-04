@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    # Roda sempre que você fizer o push de uma tag (ex: v1.0.0, v0.2.1)
+    tags:
+      - '*'
+
+permissions:
+  contents: write # Necessário para criar a release no repositório
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Obrigatório para o GoReleaser ler o histórico de commits e gerar o changelog
+
+      - name: Configurar o Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Executar o GoReleaser
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
