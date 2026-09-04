@@ -1,97 +1,324 @@
-# 🍇 Amora - Micro-PaaS para Raspberry Pi
+# 🍇 Amora — Micro-PaaS para Raspberry Pi
 
-O **Amora** é um Micro-Platform as a Service (PaaS) leve, focado em Developer Experience (DX) e inspirado no Heroku e Vercel, projetado para rodar perfeitamente em dispositivos limitados como o Raspberry Pi. 
+O **Amora** é um Micro-Platform as a Service (PaaS) leve e open-source, focado em Developer Experience (DX) e inspirado no Heroku, projetado para rodar em dispositivos ARM64 como o Raspberry Pi.
 
-Ele permite o deploy automatizado de aplicações usando um simples `git push`, suportando múltiplas linguagens (via `mise`), configuração de variáveis de ambiente dinâmicas, logs em tempo real, proxy reverso automatizado e descoberta de rede local (mDNS) sem necessidade de dependências pesadas como o Docker.
+Deploy automatizado via `git push`, múltiplas linguagens (via `mise`), variáveis de ambiente dinâmicas, logs em tempo real, proxy reverso automatizado e descoberta na rede local (mDNS) — tudo sem Docker.
+
+---
+
+## 🚀 Quickstart — Do zero ao deploy em 5 minutos
+
+### Pré-requisitos
+
+- Um **Raspberry Pi** com Raspberry Pi OS (64-bit / ARM64) acessível via SSH
+- Um **Mac/Linux** de desenvolvimento com Go 1.22+ instalado
+
+### 1. Provisionar o Raspberry Pi
+
+No seu Mac, clone o repositório e execute:
+
+```bash
+# Compilar o Amora
+go build -o amora ./cmd/amora
+
+# Provisionar o Pi (instala tudo automaticamente)
+./amora provision pi@raspberrypi.local
+```
+
+Esse comando conecta via SSH, instala as dependências base (`git`, `curl`, `caddy`, `avahi-daemon`, `build-essential`), cria o usuário `amora`, configura o `mise`, habilita o `systemd linger` e envia o binário compilado para o Pi.
+
+### 2. Criar uma aplicação no Pi
+
+Conecte no Pi como o usuário `amora` e crie o app:
+
+```bash
+ssh amora@raspberrypi.local
+
+# Inicializar o ambiente (roda apenas uma vez)
+amora setup
+
+# Criar a aplicação
+amora create --app meu-app
+```
+
+O comando `create` inicializa um repositório Git bare, instala o hook de deploy e atribui uma porta única (a partir de 5000).
+
+### 3. Preparar o seu projeto
+
+Na raiz do seu projeto, crie dois arquivos:
+
+**`Procfile`** — define os processos:
+```
+web: node server.js
+```
+
+**`amora-build`** *(opcional)* — script de build:
+```bash
+#!/bin/bash
+npm install
+```
+
+Se você usa Node.js, crie também um **`.node-version`**:
+```
+20.11.0
+```
+
+### 4. Fazer o deploy
+
+De volta ao seu Mac, adicione o remote e faça push:
+
+```bash
+git remote add amora amora@raspberrypi.local:repos/meu-app.git
+git push amora main
+```
+
+O terminal vai exibir todo o pipeline em tempo real:
+
+```
+🍇 Amora
+
+-----> Deploying 'meu-app'...
+-----> Checking out code...
+       ✓ Code checked out to /home/amora/apps/meu-app
+-----> Provisionando runtimes (mise)...
+-----> Executando amora-build...
+       ✓ Build concluído
+-----> Reading Procfile...
+       ✓ Process: web → node server.js
+-----> Generating systemd services...
+       ✓ Generated amora-meu-app-web.service
+-----> Configuring reverse proxy...
+       ✓ Caddyfile: meu-app.local → localhost:5000
+-----> Deploy complete! 🎉
+
+  🌐 http://meu-app.local
+  🔌 http://localhost:5000
+```
+
+### 5. Acessar a aplicação
+
+Abra o navegador em qualquer dispositivo da rede local:
+
+```
+http://meu-app.local
+```
+
+---
+
+## 💻 CLI — Referência de Comandos
+
+### `amora provision [user@host]`
+
+Prepara um Raspberry Pi do zero. Roda no **Mac/Linux** do desenvolvedor.
+
+- Instala dependências via `apt-get` (apenas ferramentas vitais — sem Node/Python)
+- Cria o usuário `amora` com SSH configurado
+- Instala o `mise` isolado em `/home/amora/.local/bin/mise`
+- Habilita `loginctl enable-linger amora`
+- Cross-compila (`GOOS=linux GOARCH=arm64`) e envia o binário via SCP
+- **Idempotente**: pode rodar múltiplas vezes sem quebrar
+
+```bash
+amora provision pi@raspberrypi.local
+```
+
+### `amora setup`
+
+Inicializa a estrutura de diretórios no Pi. Roda **dentro do Pi** como usuário `amora`.
+
+```bash
+amora setup
+```
+
+### `amora create --app <nome>`
+
+Cria uma nova aplicação no Pi.
+
+- Inicializa repositório Git bare em `~/repos/<nome>.git`
+- Instala o hook `post-receive` que aciona o pipeline de deploy
+- Atribui uma porta única sequencial (5000, 5001, ...)
+- Cria o diretório de trabalho em `~/apps/<nome>`
+
+```bash
+amora create --app blog
+```
+
+### `amora env`
+
+Gerenciamento de variáveis de ambiente (12-Factor App).
+
+```bash
+# Definir variáveis (reinicia o serviço automaticamente)
+amora env set blog PORT=5000 NODE_ENV=production DATABASE_URL=postgres://...
+
+# Listar variáveis
+amora env ls blog
+
+# Remover uma variável (reinicia o serviço automaticamente)
+amora env rm blog DATABASE_URL
+```
+
+As variáveis são armazenadas em `~/.amora/envs/<app>.env` e injetadas no processo via diretiva `EnvironmentFile` do systemd — sem dependência de pacotes como `dotenv`.
+
+### `amora logs <app> [-f] [-n <linhas>]`
+
+Visualização de logs em tempo real.
+
+```bash
+# Últimas 50 linhas (padrão)
+amora logs blog
+
+# Acompanhar em tempo real (Ctrl+C para sair)
+amora logs blog -f
+
+# Últimas 200 linhas
+amora logs blog -n 200
+```
+
+Wrapper do `journalctl --user -u amora-<app>-web.service` com stdout/stderr conectados diretamente ao terminal.
 
 ---
 
 ## 🏗️ Arquitetura e Tech Stack
 
-O Amora baseia-se fortemente em recursos nativos do ecossistema Linux moderno, coordenados por um orquestrador escrito em **Go (Golang)**.
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Mac/PC do Desenvolvedor                                    │
+│                                                             │
+│  git push amora main ──────────────────────┐                │
+│  amora provision pi@...                    │                │
+│  amora env set app KEY=VALUE               │                │
+│  amora logs app -f                         │                │
+└────────────────────────────────────────────┼────────────────┘
+                                             │ SSH / Git
+┌────────────────────────────────────────────▼────────────────┐
+│  Raspberry Pi (ARM64)                                       │
+│                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  Git (bare)  │→ │ Amora (Go)   │→ │ systemd --user   │  │
+│  │  post-receive│  │ Orquestrador │  │ amora-app-web    │  │
+│  └──────────────┘  └──────┬───────┘  └────────┬─────────┘  │
+│                           │                    │            │
+│  ┌──────────────┐  ┌──────▼───────┐  ┌────────▼─────────┐  │
+│  │  mise        │  │ Caddy Server │  │ Avahi (mDNS)     │  │
+│  │  Runtimes    │  │ :80 → :5000  │  │ app.local → IP   │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
 
-*   **Orquestrador (CLI/Hook):** Escrito em Go, atua como o cérebro da plataforma. Ele recebe o git push, compila, lê configurações e gerencia os serviços do sistema.
-*   **Processos (Init System):** `systemd --user`. Roda os aplicativos de forma resiliente, lidando com restarts e logs (`journald`), sem necessidade de permissões `root` ou de containers pesados.
-*   **Proxy Reverso:** `Caddy Server`. Roteia o tráfego da porta 80 para a porta alocada para cada aplicação de forma dinâmica via API.
-*   **mDNS (Rede Local):** `Avahi`. Responsável por mapear e fazer o broadcast dos domínios customizados (ex: `http://app-teste.local`) na rede Wi-Fi local.
-*   **Gerenciador de Runtimes:** `mise`. Instala e isola dinamicamente versões específicas de linguagens (Node.js, Python, etc.) solicitadas por cada aplicação (ex: `.node-version`), sem sujar o sistema operacional global.
-
----
-
-## 🚀 O Ciclo de Vida do Deploy (Pipeline)
-
-Quando um desenvolvedor executa `git push amora main` no seu Mac/PC, a seguinte cadeia de eventos ocorre em milissegundos no Raspberry Pi:
-
-1.  **Git Post-Receive Hook:** O Git recebe o código e engatilha o binário do Amora.
-2.  **Checkout:** O código-fonte é extraído para `/home/amora/apps/<app>`.
-3.  **Runtime Provisioning (`mise`):** O Amora detecta arquivos como `.node-version` ou `.mise.toml`, baixa e instala o runtime da linguagem estritamente na pasta do usuário `amora`.
-4.  **Build Phase (`amora-build`):** Se houver um script `amora-build` na raiz (ex: `npm install`), ele é executado usando o ambiente provisionado.
-5.  **Procfile Parsing:** O arquivo `Procfile` é lido para mapear os processos necessários (ex: `web: node server.js`).
-6.  **Systemd Generation:** Arquivos de serviço (`amora-<app>-web.service`) são criados dinamicamente em `~/.config/systemd/user/`.
-7.  **Proxy Routing:** O Caddy é reconfigurado para rotear o tráfego do domínio local (ex: `<app>.local`) para a porta da aplicação.
-8.  **mDNS Setup:** O domínio `<app>.local` é atrelado ao IP do Raspberry Pi no serviço Avahi.
-9.  **Restart:** O serviço systemd reinicia a aplicação sob a nova versão do código com zero-downtime percebido.
-
----
-
-## 💻 Comandos e CLI
-
-O Amora possui uma CLI poderosa cross-platform (roda no Mac para administrar remotamente, ou dentro do Pi).
-
-### `amora provision [user@host]`
-Prepara um Raspberry Pi "cru" de forma automatizada (Zero Setup).
-*   **O que faz:** Conecta via SSH, atualiza dependências do `apt-get`, instala o Caddy, Avahi, configura chaves SSH, cria o usuário restrito `amora`, habilita o *Linger* do systemd, instala o `mise`, compila cruzado o próprio Amora para `ARM64` no host e envia o binário pronto para uso.
-
-### `amora env`
-Gerenciamento de variáveis de ambiente estilo 12-Factor App.
-*   `amora env set <app> KEY=VALUE`: Define a variável, salva em um arquivo blindado e **reinicia** automaticamente o serviço no Pi.
-*   `amora env ls <app>`: Lista todas as variáveis ativas do app.
-*   *Implementação Técnica:* O Amora gera serviços systemd com a diretiva `EnvironmentFile=-/home/amora/.amora/envs/<app>.env`, fazendo com que o próprio Kernel Linux injete as variáveis nativamente no processo (eliminando pacotes como `dotenv`).
-
-### `amora logs [app] [-f]`
-Visualização unificada de logs.
-*   **O que faz:** Conecta as saídas padrão e de erro do processo remoto diretamente no terminal do desenvolvedor.
-*   *Implementação Técnica:* É um wrapper do comando `journalctl --user -u amora-<app>-web.service`. A flag `-f` suporta *tailing* (acompanhamento em tempo real).
+| Componente | Tecnologia | Função |
+|------------|-----------|--------|
+| **Orquestrador** | Go (Golang) | CLI + pipeline de deploy |
+| **Processos** | `systemd --user` | Init system, restarts, journald |
+| **Proxy Reverso** | Caddy Server | Roteia `:80` → porta do app via API |
+| **mDNS** | Avahi | Broadcast de `<app>.local` na rede |
+| **Runtimes** | mise | Node.js, Python, Ruby, etc. isolados |
 
 ---
 
-## 🏛️ Decisões Arquitetônicas e Evolução (ADRs)
+## 🔄 Pipeline de Deploy (detalhado)
 
-Ao longo do desenvolvimento do Amora, decisões cruciais foram tomadas para balancear segurança, performance (CPU/RAM limitados no Pi) e Developer Experience.
+Ao executar `git push amora main`, o seguinte pipeline é executado no Pi:
 
-### 1. Systemd vs Docker
-*   **Problema:** O Docker consome muitos recursos (RAM e CPU) em dispositivos limitados como o Raspberry Pi.
-*   **Decisão:** Utilizar o sistema de init nativo do Linux (`systemd --user`).
-*   **Benefício:** Overhead zero. Processos rodam de forma nativa e isolada sob o usuário `amora`. Habilitamos o *Linger* (`loginctl enable-linger amora`) para que os aplicativos continuem rodando após o logout da sessão SSH.
+1. **Git Post-Receive Hook** — aciona `amora hook post-receive --app <app>`
+2. **Checkout** — extrai o código para `/home/amora/apps/<app>`
+3. **Runtime Provisioning** — executa `mise install` (respeita `.node-version`, `.python-version`, `.mise.toml`)
+4. **Build Phase** — se existir `amora-build` na raiz, recebe `chmod 0755` e é executado via `mise exec -- ./amora-build`
+5. **Procfile Parsing** — lê processos definidos (ex: `web: node server.js`)
+6. **Systemd Generation** — cria units em `~/.config/systemd/user/amora-<app>-<processo>.service`
+7. **Proxy Routing** — gera Caddyfile e recarrega via API (`POST localhost:2019/load`)
+8. **mDNS Setup** — registra `<app>.local` no `/etc/avahi/hosts`
+9. **Restart** — `daemon-reload` + `enable` + `restart` dos serviços
 
-### 2. O Pivô do mDNS (Avahi)
-*   **Problema:** Inicialmente, o Amora tentou publicar os domínios `.local` criando um serviço systemd que rodava o comando `avahi-publish`. O Linux barrou a execução (Exit Status 5) pois processos em background do `systemd --user` não possuem permissão para se comunicar com o *System D-Bus* por razões estritas de segurança do Debian/Polkit.
-*   **Decisão (Pivô):** Substituir a chamada ativa de D-Bus por edição de arquivo estático. O orquestrador em Go agora descobre o IP da máquina e anexa uma entrada diretamente no arquivo `/etc/avahi/hosts`.
-*   **Benefício:** O daemon central do Avahi monitora o arquivo via *inotify* e faz o broadcast instantâneo na rede local, eliminando dezenas de instâncias rodando em background e mitigando os bloqueios de segurança do sistema operacional.
+### Contratos do Repositório
 
-### 3. O Pivô de Runtimes (Global vs Mise)
-*   **Problema:** Instalar dependências globais via `apt-get` (ex: `sudo apt install nodejs`) gerava o "risco do canivete suíço". Aplicações diferentes precisariam de versões diferentes do Node.js ou Python, gerando conflitos.
-*   **Decisão (Pivô):** Implementar o `mise` como gerenciador dinâmico de linguagens, instalado exclusivamente na pasta do usuário `amora`.
-*   **Benefício:** Cada repositório dita suas dependências no arquivo de versão (ex: `.node-version`). O `systemd` então é configurado com uma chamada envelopada no executável, garantindo isolamento total (ex: `ExecStart=/home/amora/.local/bin/mise exec -- node server.js`).
-
-### 4. A Abstração de Build (`amora-build`)
-*   **Problema:** O PaaS (Go) não deveria precisar conhecer os comandos específicos de build de todas as linguagens (Go, Rust, Node, Python).
-*   **Decisão:** Delegação de responsabilidade. O projeto estabeleceu o contrato do arquivo executável `amora-build` na raiz do repositório.
-*   **Benefício:** Se o arquivo existir, o Amora o executa com saída em tempo real no terminal do usuário (`npm install`, `pip install`, `go build`). O Amora se mantém agnóstico; o repositório é dono do seu próprio pipeline de build.
+| Arquivo | Obrigatório | Descrição |
+|---------|:-----------:|-----------|
+| `Procfile` | ✅ | Define processos. Formato: `tipo: comando` |
+| `amora-build` | ❌ | Script de build (qualquer linguagem via shebang) |
+| `.node-version` | ❌ | Versão do Node.js para o mise provisionar |
+| `.python-version` | ❌ | Versão do Python para o mise provisionar |
+| `.mise.toml` | ❌ | Configuração avançada do mise (múltiplos runtimes) |
 
 ---
 
-## 📂 Estrutura de Diretórios no Raspberry Pi
+## 🏛️ Decisões Arquitetônicas (ADRs)
 
-A infraestrutura mantida pelo Amora sob o usuário `/home/amora/` segue o seguinte padrão:
+### 1. Systemd em vez de Docker
+
+O Docker consome muitos recursos em dispositivos limitados. O `systemd --user` oferece overhead zero — processos rodam nativamente sob o usuário `amora`. O *Linger* (`loginctl enable-linger amora`) garante que os serviços sobrevivam ao logout da sessão SSH.
+
+### 2. Pivô do mDNS — De `avahi-publish` para `/etc/avahi/hosts`
+
+Inicialmente, o Amora publicava domínios `.local` via serviço systemd executando `avahi-publish`. O Linux barrava a execução (Exit Status 5) pois processos `systemd --user` não têm permissão para se comunicar com o System D-Bus (sandboxing Polkit).
+
+**Solução**: O Go descobre o IP local e escreve diretamente no `/etc/avahi/hosts`. O daemon do Avahi detecta a mudança via *inotify* e faz o broadcast automaticamente. Se o IP mudar (DHCP), o Amora atualiza a entrada existente em vez de duplicá-la.
+
+### 3. Pivô de Runtimes — De `apt-get` global para `mise` isolado
+
+Instalar runtimes via `apt-get install nodejs` gera conflitos quando apps precisam de versões diferentes. O `mise` é instalado exclusivamente na pasta do usuário `amora` (`/home/amora/.local/bin/mise`).
+
+Cada serviço systemd envelopa o processo com mise:
+```ini
+ExecStart=/home/amora/.local/bin/mise exec -- /bin/bash -c 'node server.js'
+```
+
+Isso garante que o processo herda o runtime correto sem poluir o sistema.
+
+### 4. Build delegado ao repositório (`amora-build`)
+
+O PaaS não precisa conhecer os comandos de build de cada linguagem. O contrato é simples: se existir um arquivo `amora-build` na raiz do repositório, ele será executado. O script pode ter qualquer shebang (`#!/bin/bash`, `#!/usr/bin/env python3`, etc.).
+
+---
+
+## 📂 Estrutura de Diretórios no Pi
 
 ```text
-~/.amora/
-  ├── envs/               # Arquivos .env segregados por aplicação (<app>.env)
-~/apps/                   # Diretório de checkout das aplicações via Git
-  ├── app-teste/          # Aplicação rodando
-~/repos/                  # Repositórios Git (bare) que recebem o `git push`
-  ├── app-teste.git/      # Repositório remoto onde o hook do Amora reside
-~/.config/systemd/user/   # Diretório nativo de units do systemd
-  ├── amora-app-teste-web.service # Unit gerada dinamicamente
-~/.local/bin/             # Ferramentas isoladas do usuário amora (mise)
+/home/amora/
+├── .amora/
+│   └── envs/                    # Variáveis de ambiente (<app>.env)
+├── apps/
+│   └── meu-app/                 # Checkout do código fonte
+├── repos/
+│   └── meu-app.git/             # Repositório bare (recebe git push)
+│       └── hooks/post-receive   # Hook que aciona o pipeline
+├── caddy/
+│   └── meu-app.caddyfile        # Snippet de roteamento por app
+├── .config/systemd/user/
+│   └── amora-meu-app-web.service  # Unit gerada dinamicamente
+└── .local/bin/
+    └── mise                     # Runtime manager isolado
+```
+
+---
+
+## 🛠️ Desenvolvimento
+
+### Requisitos
+
+- Go 1.22+
+- Raspberry Pi com SSH acessível (para testes reais)
+
+### Build local
+
+```bash
+go build -o amora ./cmd/amora
+```
+
+### Testes
+
+```bash
+go test ./...
+```
+
+### Deploy do binário para o Pi (dev)
+
+```bash
+./deploy-dev.sh
+```
+
+---
+
+## 📄 Licença
+
+Este projeto é open-source. Contribuições são bem-vindas!
