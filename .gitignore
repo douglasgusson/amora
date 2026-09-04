@@ -17,3 +17,4 @@ go.work.sum
 build/
 /amora
 /amora-arm64
+/amora-linux-arm64
