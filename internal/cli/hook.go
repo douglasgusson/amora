@@ -155,15 +155,34 @@ func (p *DeployPipeline) Run(app string) error {
 		LogSuccess("Process: %s → %s", e.Name, e.Command)
 	}
 
-	// ── Step 4: Allocate port (dynamic) ───────────────────────────────
+	// ── Passo Inteligente: Detectar Processo 'web' ──────────────────────
 
-	LogInfo("Resolving port allocation...")
-	port, err := p.EnvMgr.GetOrAssignPort(app)
-	if err != nil {
-		LogError("Failed to allocate port: %v", err)
-		return fmt.Errorf("port allocation: %w", err)
+	hasWeb := false
+	for _, e := range entries {
+		if e.Name == "web" {
+			hasWeb = true
+			break
+		}
 	}
-	LogSuccess("PORT=%d", port)
+
+	var port int
+	if hasWeb {
+		// ── Step 4: Allocate port (dynamic) ───────────────────────────────
+		LogInfo("Resolving port allocation...")
+		p, err := p.EnvMgr.GetOrAssignPort(app)
+		if err != nil {
+			LogError("Failed to allocate port: %v", err)
+			return fmt.Errorf("port allocation: %w", err)
+		}
+		port = p
+		LogSuccess("PORT=%d", port)
+	} else {
+		LogInfo("⚙️ Nenhum processo 'web' detectado. Pulando roteamento e proxy.")
+		// Cleanup legacy network configs if user removed the 'web' process
+		proxy.RemoveCaddyfile(app)
+		proxy.ReloadCaddyFrom(p.CaddyDir)
+		mdns.RemoveService(app)
+	}
 
 	// ── Step 5: Generate systemd services ──────────────────────────────
 
@@ -192,7 +211,7 @@ func (p *DeployPipeline) Run(app string) error {
 
 	// ── Step 6: Configure reverse proxy (Caddy) ────────────────────────
 
-	if port > 0 {
+	if hasWeb && port > 0 {
 		LogInfo("Configuring reverse proxy...")
 
 		if err := proxy.GenerateCaddyfileAt(p.CaddyDir, app, port); err != nil {
@@ -211,12 +230,14 @@ func (p *DeployPipeline) Run(app string) error {
 
 	// ── Step 7: Configure mDNS (Avahi) ─────────────────────────────────
 
-	LogInfo("Configuring mDNS (Avahi)...")
-	if err := mdns.GenerateService(app); err != nil {
-		LogError("mDNS setup failed: %v", err)
-		// Non-fatal: the app is still accessible by IP.
-	} else {
-		LogSuccess("Generated mDNS entry in Avahi hosts")
+	if hasWeb {
+		LogInfo("Configuring mDNS (Avahi)...")
+		if err := mdns.GenerateService(app); err != nil {
+			LogError("mDNS setup failed: %v", err)
+			// Non-fatal: the app is still accessible by IP.
+		} else {
+			LogSuccess("Generated mDNS entry in Avahi hosts")
+		}
 	}
 
 	// ── Step 8: Reload systemd and (re)start services ──────────────────
@@ -247,12 +268,14 @@ func (p *DeployPipeline) Run(app string) error {
 	LogInfo("Deploy complete! 🎉")
 	fmt.Println()
 
-	if port > 0 {
+	if hasWeb && port > 0 {
 		fmt.Printf("  🌐 http://%s.local\n", app)
 		if ip, err := mdns.GetLocalIP(); err == nil {
 			fmt.Printf("  📡 http://%s:%d\n", ip, port)
 		}
 		fmt.Printf("  🔌 http://localhost:%d\n", port)
+	} else {
+		fmt.Printf("  ⚙️  Worker process deployed successfully.\n")
 	}
 	fmt.Println()
 
@@ -271,6 +294,10 @@ func parsePushInfo(r io.Reader) (newRef, branch string, err error) {
 			refParts := strings.Split(parts[2], "/")
 			branch = refParts[len(refParts)-1]
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", "", fmt.Errorf("reading git push info: %w", err)
 	}
 
 	if newRef == "" {
