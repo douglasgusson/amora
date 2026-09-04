@@ -249,6 +249,9 @@ func (p *DeployPipeline) Run(app string) error {
 
 	if port > 0 {
 		fmt.Printf("  🌐 http://%s.local\n", app)
+		if ip, err := mdns.GetLocalIP(); err == nil {
+			fmt.Printf("  📡 http://%s:%d\n", ip, port)
+		}
 		fmt.Printf("  🔌 http://localhost:%d\n", port)
 	}
 	fmt.Println()
