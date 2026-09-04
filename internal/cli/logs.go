@@ -25,9 +25,8 @@ func NewLogsCmd() *cobra.Command {
 
 			// Monta o comando base do journalctl
 			journalArgs := []string{
-				"--user",
+				"--user-unit", serviceName,
 				"--no-pager",
-				"-u", serviceName,
 				"-n", fmt.Sprintf("%d", linesCount),
 			}
 
