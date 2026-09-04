@@ -15,14 +15,16 @@ Deploy automatizado via `git push`, múltiplas linguagens (via `mise`), variáve
 
 ### 1. Provisionar o Raspberry Pi
 
-No seu Mac, clone o repositório e execute:
+No seu Mac ou Linux, baixe e instale a CLI do Amora com um único comando:
 
 ```bash
-# Compilar o Amora
-go build -o amora ./cmd/amora
+curl -sL https://raw.githubusercontent.com/douglasgusson/amora/main/install.sh | bash
+```
 
-# Provisionar o Pi (instala tudo automaticamente)
-./amora provision pi@raspberrypi.local
+Em seguida, provisione o Pi (instala tudo automaticamente):
+
+```bash
+amora provision pi@raspberrypi.local
 ```
 
 Esse comando conecta via SSH, instala as dependências base (`git`, `curl`, `caddy`, `avahi-daemon`, `build-essential`), cria o usuário `amora`, configura o `mise`, habilita o `systemd linger` e envia o binário compilado para o Pi.
@@ -92,6 +94,7 @@ O terminal vai exibir todo o pipeline em tempo real:
 -----> Deploy complete! 🎉
 
   🌐 http://meu-app.local
+  📡 http://192.168.1.120:5000
   🔌 http://localhost:5000
 ```
 
@@ -175,7 +178,7 @@ amora logs blog -f
 amora logs blog -n 200
 ```
 
-Wrapper do `journalctl --user -u amora-<app>-web.service` com stdout/stderr conectados diretamente ao terminal.
+Wrapper do `journalctl --user-unit=amora-<app>-web.service` com stdout/stderr conectados diretamente ao terminal.
 
 ---
 
