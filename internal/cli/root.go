@@ -24,6 +24,7 @@ get automatic mDNS discovery, and zero-config reverse proxy.`,
 		NewProvisionCmd(),
 		NewAppsCmd(),
 		NewRestartCmd(),
+		NewStatusCmd(),
 	)
 
 	return cmd
